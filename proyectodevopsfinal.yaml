@@ -1,0 +1,96 @@
+---
+- name: Proyecto Final
+  hosts: localhost
+  become: yes
+
+  tasks:
+    - name: Actualizar caché de DNF
+      dnf:
+        update_cache: yes
+
+    - name: Instalar herramientas necesarias para DNF
+      dnf:
+        name: dnf-plugins-core
+        state: present
+
+    - name: Añadir repo para RHEL
+      command: dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+
+    - name: Instalar Docker y Docker Compose
+      dnf:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Activar Docker
+      service:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Verificar estado de Docker
+      command: systemctl is-active docker
+      register: docker_status
+
+    - name: Mostrar estado de Docker
+      debug:
+        msg: "Estado de Docker: {{ docker_status.stdout }}"
+
+    - name: Desactivar SELinux temporalmente
+      command: setenforce 0
+      ignore_errors: true
+
+    - name: Desactivar SELinux permanentemente
+      lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: 'SELINUX=disabled'
+
+    - name: Verificar estado de SELinux
+      command: getenforce
+      register: selinux_status
+
+    - name: Mostrar estado de SELinux
+      debug:
+        msg: "Estado de SELinux: {{ selinux_status.stdout }}"
+
+    - name: Parar Podman
+      service:
+        name: podman.socket
+        state: stopped
+      ignore_errors: true
+
+    - name: Activar Podman
+      service:
+        name: podman.socket
+        enabled: yes
+        state: started
+
+    - name: Instalar colección de Docker para Ansible
+      command: ansible-galaxy collection install community.docker
+      ignore_errors: true
+
+    - name: Verificar si la carpeta DockerWebApp existe
+      stat:
+        path: "{{ ansible_env.HOME }}/DockerWebApp"
+      register: dockerwebapp_dir
+
+    - name: Borrar el directorio DockerWebApp si existe
+      file:
+        path: "{{ ansible_env.HOME }}/DockerWebApp"
+        state: absent
+      when: dockerwebapp_dir.stat.exists
+
+    - name: Clonar repositorio
+      git:
+        repo: https://gitlab.com/cabrales.eliezer/DockerWebApp.git
+        dest: "{{ ansible_env.HOME }}/DockerWebApp"
+
+    - name: Desplegar contenedores con Docker Compose v2
+      community.docker.docker_compose_v2:
+        project_src: "{{ ansible_env.HOME }}/DockerWebApp"
+        state: present
